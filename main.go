@@ -1,9 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"net/http"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -15,24 +19,35 @@ type SystemInfo struct {
 	DiskUsage   float64
 }
 
-func main() {
-	statsChan := make(chan SystemInfo)
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
 
-	go func() {
-		for {
-			stats := collectStats()
-			statsChan <- stats
-			time.Sleep(1 * time.Second)
+func main() {
+	http.HandleFunc("/ws", handleWebSocket)
+	fmt.Println(" Websocket Server Started On ws://localhost:8080/ws")
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("Upgrade error:", err)
+		return
+	}
+	defer conn.Close()
+
+	for {
+		stats := collectStats()
+		data, _ := json.Marshal(stats)
+		err := conn.WriteMessage(websocket.TextMessage, data)
+		if err != nil {
+			log.Println("Write Error:", err)
+			break
 		}
-	}()
-	for s := range statsChan {
-		// Clear screen (capital J) and move cursor to home
-		fmt.Printf("\033[2J\033[H")
-		fmt.Println(" System Resource Monitor")
-		fmt.Println("==========================")
-		fmt.Printf("CPU Usage: %.2f%%\n", s.CPUUsage)
-		fmt.Printf("Memory Usage: %.2f%%\n", s.MemoryUsage)
-		fmt.Printf("Disk Usage: %.2f%%\n", s.DiskUsage)
+		time.Sleep(1 * time.Second)
 	}
 }
 
